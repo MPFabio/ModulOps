@@ -1,0 +1,66 @@
+# Constats de recherche de secrets ecartes, avec leur justification.
+#
+# Les empreintes ci-dessous designent des constats historiques : le depot est
+# analyse sur son historique complet a chaque execution, et un secret retire
+# reste lisible dans les commits anterieurs. Les ecarter nommement laisse la
+# recherche bloquante pour tout nouveau constat, ce qu'un abaissement de
+# perimetre ne ferait pas.
+
+# Kubeconfig d'administration de trois clusters AKS, commite le 21/01/2026 et
+# retire depuis. Le certificat porte O=system:masters et court jusqu'au
+# 28/11/2026, mais les trois clusters ont ete supprimes : leurs noms DNS ne
+# resolvent plus, il n'y a donc rien a revoquer ni a atteindre.
+#
+# L'entree reste ici plutot que d'etre effacee par une reecriture d'historique :
+# celle-ci ne retirerait rien des clones et des forks deja distribues, et
+# casserait les references de commit citees dans les dossiers de certification.
+# Ce qui a ete corrige, c'est la cause : kubeconfig.yaml est desormais ignore,
+# le motif du .gitignore ne couvrant que kubeconfig-*.yaml.
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:103
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:108
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:113
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:118
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:123
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:128
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:133
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:138
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:143
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:148
+b8e77bbd90e99bcf65c4dd5eb1a5e6dfc51df048:kubeconfig.yaml:generic-api-key:153
+
+# Faux positif : la variable nommee `key` porte un prefixe de cle d'objet S3
+# (chemin d'un fichier d'etat), pas un secret. Le nom seul a suffi a la regle
+# generique.
+bad3fc652ab421fb206b9386af4a8ef2cf2b6dc0:services/terraform-service/internal/service/terraform_service.go:generic-api-key:125
+bad3fc652ab421fb206b9386af4a8ef2cf2b6dc0:services/terraform-service/internal/service/terraform_service.go:generic-api-key:127
+e742fb261ebef60670f69cb9d389668caf2b8a9d:services/terraform-service/internal/service/terraform_service.go:generic-api-key:124
+e742fb261ebef60670f69cb9d389668caf2b8a9d:services/terraform-service/internal/service/terraform_service.go:generic-api-key:126
+eaee2c4da36cbc9b9c956013f7777cb488e0aebe:services/terraform-service/internal/service/terraform_service.go:generic-api-key:125
+eaee2c4da36cbc9b9c956013f7777cb488e0aebe:services/terraform-service/internal/service/terraform_service.go:generic-api-key:127
+
+# Exemples de documentation : en-tetes Authorization et identifiants de
+# demonstration dans les guides de test des services. Aucun n'a jamais donne
+# acces a quoi que ce soit.
+13628807c77d34fb93c0c04ca134a98a87f1e9bd:services/ansible-service/TEST.md:curl-auth-user:289
+13628807c77d34fb93c0c04ca134a98a87f1e9bd:services/ansible-service/TEST.md:curl-auth-user:298
+7dfa25b9f1e86bb31ca75d50ee7e316462b667cb:services/auth-service/TEST.md:curl-auth-header:163
+7dfa25b9f1e86bb31ca75d50ee7e316462b667cb:services/auth-service/TEST.md:curl-auth-header:199
+7dfa25b9f1e86bb31ca75d50ee7e316462b667cb:services/auth-service/TEST.md:generic-api-key:143
+7dfa25b9f1e86bb31ca75d50ee7e316462b667cb:services/auth-service/TEST.md:generic-api-key:144
+b17521c39b7a5e01b4dd21d6b4bf728e94c32407:services/auth-service/TEST.md:curl-auth-header:163
+b17521c39b7a5e01b4dd21d6b4bf728e94c32407:services/auth-service/TEST.md:curl-auth-header:199
+b17521c39b7a5e01b4dd21d6b4bf728e94c32407:services/auth-service/TEST.md:generic-api-key:143
+b17521c39b7a5e01b4dd21d6b4bf728e94c32407:services/auth-service/TEST.md:generic-api-key:144
+
+13628807c77d34fb93c0c04ca134a98a87f1e9bd:services/ansible-service/QUICK_START.md:curl-auth-user:48
+7dfa25b9f1e86bb31ca75d50ee7e316462b667cb:services/auth-service/QUICK_START.md:curl-auth-header:65
+b17521c39b7a5e01b4dd21d6b4bf728e94c32407:services/auth-service/QUICK_START.md:curl-auth-header:60
+
+# Mot de passe par defaut d'Ansible Tower dans une ancienne version du
+# compose. Le service a ete remplace par Semaphore et la variable n'existe plus
+# dans le fichier actuel.
+9a812553d525cca9e197a300975b82ceae8f6f8f:docker-compose.yml:generic-api-key:397
+
+# Artefact de construction du frontend, indexe par erreur : chaine du paquet
+# xterm, pas un identifiant.
+f8ae92dc790848fdcc2a1b889f47a090da1a5f68:frontend/.vite/deps/xterm.js:generic-api-key:3377

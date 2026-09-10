@@ -79,3 +79,7 @@ Thumbs.db
 # Exports temporaires de bases (jamais versionner : hachages et cles chiffrees)
 *.sqlite
 *.sqlite3
+
+# Kubeconfig depose a la racine par les outils d administration : le motif
+# precedent ne couvrait pas ce nom exact, et un fichier a ete commite ainsi.
+kubeconfig.yaml
