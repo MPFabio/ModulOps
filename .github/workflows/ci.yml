@@ -154,10 +154,16 @@ jobs:
     needs: [frontend, services-go, images]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
+      # L'etiquette des images vient d'etre publiee par le job precedent, au
+      # format sha-<7 caracteres>. La transmettre rend le deploiement
+      # deterministe : le cluster recoit exactement ce que cette execution a
+      # construit et teste, et non la derniere version disponible au moment
+      # ou le deploiement se declenche.
       - name: Dispatch deploy-kura sur Forgejo (Codeberg)
         run: |
+          etiquette="sha-$(echo "${{ github.sha }}" | cut -c1-7)"
           curl -sf -X POST \
             -H "Authorization: token ${{ secrets.FORGEJO_DISPATCH_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"ref":"main"}' \
+            -d "{\"ref\":\"main\",\"inputs\":{\"image_tag\":\"${etiquette}\",\"cible\":\"cluster\"}}" \
             "${{ secrets.FORGEJO_URL }}/api/v1/repos/MPFabio/Kuro/actions/workflows/deploy-kura.yml/dispatches"
