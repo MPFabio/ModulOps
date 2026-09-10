@@ -12,9 +12,9 @@ technologies qui lui sont propres.
 | Contrôle | Outil | Portée | Seuil de blocage |
 |---|---|---|---|
 | Analyse statique du code | gosec | 8 services Go | sévérité MEDIUM |
-| Configuration d'infrastructure | checkov | OpenTofu, Kubernetes | tout constat non excepté |
-| Secrets committés | gitleaks | historique complet | toute détection |
-| Vulnérabilités des dépendances | grype, sur SBOM syft | conteneurs et modules | sévérité High |
+| Configuration d'infrastructure | checkov | OpenTofu et manifestes Kubernetes du dépôt d'exploitation | tout constat non excepté |
+| Secrets committés | gitleaks | historique complet des deux dépôts | toute détection |
+| Vulnérabilités des dépendances | grype, sur SBOM syft | modules Go et paquets npm des deux dépôts | sévérité High |
 | Scripts et playbooks | shellcheck, ansible-lint | amorçage des machines | toute erreur |
 | Tests unitaires | go test, vitest | services Go et frontend | tout échec |
 
@@ -101,6 +101,19 @@ non.
 
 - Aucune analyse dynamique (DAST) n'est en place : l'analyse est statique et
   porte sur le code, les dépendances et la configuration.
+- **Les images publiées ne sont pas encore analysées.** L'analyse porte sur les
+  dépendances déclarées, pas sur ce que la couche de base embarque. Une mesure
+  sur une image applicative a relevé cinq constats critiques et dix-neuf élevés,
+  tous imputables aux paquets système de l'image de base : durcir le code ne
+  suffit pas, il faut aussi tenir la base à jour. C'est le prochain contrôle à
+  ajouter, et il suppose de rafraîchir les empreintes des images de base.
+- **Le chart Helm échappe à l'analyse de configuration.** checkov couvre
+  l'infrastructure et les manifestes du dépôt d'exploitation, pas les gabarits
+  du chart, qu'il faudrait rendre avant de les analyser. Une mesure de contrôle
+  sur le rendu relève trois familles d'écarts réels : absence de politiques
+  réseau, jetons de compte de service montés par défaut, et contexte de sécurité
+  absent sur les briques de données et d'observabilité, qui n'héritent pas du
+  durcissement des microservices.
 - Le cloisonnement réseau entre pods n'est pas encore déclaré : tout pod du
   namespace peut joindre les briques de données.
 - La revue de code n'est pas contradictoire : le dépôt n'a qu'un mainteneur,
