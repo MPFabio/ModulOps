@@ -25,7 +25,7 @@ sont distinctes et n'ont pas la même durée de validité.
 ## Revue et fusion
 
 La branche principale est protégée par une règle de dépôt : la fusion passe
-obligatoirement par une demande, les dix-huit contrôles doivent être verts, et
+obligatoirement par une demande, les vingt contrôles doivent être verts, et
 ni la suppression de la branche ni la réécriture d'historique ne sont
 autorisées. La règle s'applique sans exception, y compris aux administrateurs :
 un contrôle rouge bloque la fusion, il ne se contourne pas.
