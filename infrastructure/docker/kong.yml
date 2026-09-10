@@ -349,10 +349,35 @@ plugins:
     status_code_metrics: true
     latency_metrics: true
     upstream_health_metrics: true
+# Garde-fou global contre une boucle folle ou un client qui s'emballe, et non
+# frein a l'usage. Les valeurs precedentes, cent par minute et mille par heure,
+# etaient sous l'usage nominal : l'interface emet une dizaine d'appels par page,
+# et douze ingenieurs sortant par une meme adresse publique se les partageaient.
+#
+# Elles contredisaient surtout la mise a l'echelle : un plafond de passerelle
+# doit rester au-dessus de la capacite que l'autoscaling est cense fournir,
+# sinon il l'annule. Aucun autoscaler ne se declenche derriere une passerelle
+# qui laisse passer moins de deux requetes par seconde, et les plafonds de six,
+# cinq et quatre replicas n'auraient jamais servi. Constate par la campagne de
+# charge, qui n'a mesure que le limiteur tant qu'il est reste a ce niveau.
+#
+# Le plafond se cale sur la capacite maximale que la mise a l'echelle peut
+# fournir, et non sur une valeur ronde. Mesure : deux replicas d'auth-service
+# tiennent quatre-vingt-dix requetes par seconde a quarante pour cent de leur
+# requete CPU, soit environ soixante-dix-huit par replica au seuil de
+# declenchement. Les six replicas du plafond en absorbent donc pres de cinq
+# cents. Limiter la passerelle en dessous rendrait ces replicas inatteignables :
+# on paierait un autoscaler qui ne peut pas se declencher.
+#
+# Cinq cents requetes par seconde restent une protection reelle : une boucle
+# folle l'atteint en quelques secondes, douze utilisateurs jamais.
+#
+# La protection contre la force brute reste sur /api/v1/auth, ou elle a un objet
+# precis, avec ses vingt requetes par minute.
 - name: rate-limiting
   config:
-    minute: 100
-    hour: 1000
+    minute: 30000
+    hour: 500000
     policy: local
 - name: cors
   config:

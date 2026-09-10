@@ -30,10 +30,15 @@ spec:
       {{- include "kura.selectorLabels" "kong" | nindent 6 }}
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8100"
+        prometheus.io/path: /metrics
       labels:
         {{- include "kura.labels" . | nindent 8 }}
         {{- include "kura.selectorLabels" "kong" | nindent 8 }}
     spec:
+      enableServiceLinks: false
       containers:
         - name: kong
           image: {{ .Values.kong.image }}

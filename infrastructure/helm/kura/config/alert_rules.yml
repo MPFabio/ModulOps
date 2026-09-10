@@ -10,6 +10,27 @@ groups:
           summary: "Service {{ $labels.job }} indisponible"
           description: "La cible {{ $labels.instance }} (job {{ $labels.job }}) est injoignable depuis plus de 2 minutes."
 
+      # ServiceDown ne couvre que la cible injoignable, celle dont le pod existe
+      # mais dont le processus ne repond plus. Depuis que la collecte procede par
+      # decouverte de pods, un service reduit a zero replica ne laisse aucune
+      # cible derriere lui : la serie up disparait, et une regle qui la compare a
+      # zero ne compare plus rien. Le service le plus gravement en panne serait
+      # donc le seul a ne declencher aucune alerte.
+      #
+      # On surveille ici l'absence : un job qui avait des cibles il y a dix
+      # minutes et n'en a plus aucune. Une mise a l'echelle ordinaire ne le
+      # declenche pas, le nombre de cibles restant superieur a zero, et un
+      # redeploiement non plus, la temporisation absorbant l'intervalle entre
+      # l'arret d'un pod et la premiere collecte du suivant.
+      - alert: ServiceDisparu
+        expr: (count by (job) (up offset 10m) > 0) unless (count by (job) (up) > 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} sans aucune cible"
+          description: "Le job {{ $labels.job }} etait collecte il y a dix minutes et n'expose plus aucune cible : deploiement supprime, reduit a zero replica, ou pods non demarres."
+
   # Les seuils reprennent ceux du tableau d'indicateurs : un avertissement
   # place la derive dans la file de revue, une alerte critique declenche la
   # procedure d'incident et ouvre un ticket. L'ecart entre les deux fenetres
@@ -17,8 +38,12 @@ groups:
   # le critique reagit plus vite parce qu'il engage une intervention.
   - name: kura-latence
     rules:
+      # Meme precaution que pour le budget d'erreur : un centile calcule sur
+      # quelques requetes isolees mesure le bruit, pas le service rendu. En
+      # dessous d'une requete toutes les dix secondes, on ne conclut pas.
       - alert: LatenceElevee
         expr: histogram_quantile(0.95, sum by (le) (rate(kong_upstream_latency_ms_bucket[10m]))) > 150
+          and sum(rate(kong_http_requests_total[10m])) > 0.1
         for: 10m
         labels:
           severity: warning
@@ -28,6 +53,7 @@ groups:
 
       - alert: LatenceCritique
         expr: histogram_quantile(0.95, sum by (le) (rate(kong_upstream_latency_ms_bucket[5m]))) > 200
+          and sum(rate(kong_http_requests_total[5m])) > 0.1
         for: 5m
         labels:
           severity: critical
@@ -60,10 +86,14 @@ groups:
 
   - name: kura-error-budget
     rules:
+      # Les deux regles portent une garde de volume : sous dix mille requetes
+      # sur trente jours, le ratio n'a pas de sens statistique. Sans elle, une
+      # plateforme qui vient de demarrer annonce son budget d'erreur epuise des
+      # la premiere erreur de demarrage, le denominateur valant alors un.
       # Le budget est un ratio sur 30 jours rapporte a l'enveloppe de 1 %
       # toleree par le SLO de disponibilite : 100 % signifie enveloppe epuisee.
       - alert: ErrorBudgetEntame
-        expr: 100 * sum(increase(kong_http_requests_total{code=~"5.."}[30d])) / clamp_min(sum(increase(kong_http_requests_total[30d])), 1) / 0.01 > 50
+        expr: 100 * sum(increase(kong_http_requests_total{code=~"5.."}[30d])) / clamp_min(sum(increase(kong_http_requests_total[30d])), 1) / 0.01 > 50 and sum(increase(kong_http_requests_total[30d])) > 10000
         for: 30m
         labels:
           severity: warning
@@ -72,7 +102,7 @@ groups:
           description: "Les deploiements a risque attendent la fenetre suivante, conformement a la politique de gel."
 
       - alert: ErrorBudgetEpuise
-        expr: 100 * sum(increase(kong_http_requests_total{code=~"5.."}[30d])) / clamp_min(sum(increase(kong_http_requests_total[30d])), 1) / 0.01 > 80
+        expr: 100 * sum(increase(kong_http_requests_total{code=~"5.."}[30d])) / clamp_min(sum(increase(kong_http_requests_total[30d])), 1) / 0.01 > 80 and sum(increase(kong_http_requests_total[30d])) > 10000
         for: 30m
         labels:
           severity: critical

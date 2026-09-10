@@ -24,10 +24,24 @@ spec:
       {{- include "kura.selectorLabels" $name | nindent 6 }}
   template:
     metadata:
+      {{- /* Le frontend sert des fichiers statiques et n'expose pas de
+             métriques : il est le seul à ne pas être annoté. */}}
+      {{- if ne $svc.metrics false }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $svc.port | quote }}
+        prometheus.io/path: {{ $svc.metricsPath | default "/metrics" }}
+      {{- end }}
       labels:
         {{- include "kura.labels" $root | nindent 8 }}
         {{- include "kura.selectorLabels" $name | nindent 8 }}
     spec:
+      # Kubernetes injecte, par compatibilité avec les liens Docker, une
+      # variable <SERVICE>_PORT au format tcp://ip:port pour chaque Service du
+      # namespace. Elle écrase la variable de configuration homonyme des
+      # services (CODE_SERVICE_PORT, METRICS_SERVICE_PORT...), qui attendent un
+      # simple numéro de port.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -63,11 +77,25 @@ spec:
             periodSeconds: 20
           resources:
             {{- toYaml $svc.resources | nindent 12 }}
+          {{- if $svc.writableDirs }}
+          volumeMounts:
+            {{- range $i, $dir := $svc.writableDirs }}
+            - name: writable-{{ $i }}
+              mountPath: {{ $dir }}
+            {{- end }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      {{- if $svc.writableDirs }}
+      volumes:
+        {{- range $i, $dir := $svc.writableDirs }}
+        - name: writable-{{ $i }}
+          emptyDir: {}
+        {{- end }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

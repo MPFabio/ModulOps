@@ -17,10 +17,12 @@ FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates tzdata wget
 
-WORKDIR /root/
+WORKDIR /app
 
-COPY --from=builder /app/ansible-service .
+COPY --from=builder /app/ansible-service /app/ansible-service
+
+USER 10001
 
 EXPOSE 8083
 
-CMD ["./ansible-service"]
+CMD ["/app/ansible-service"]

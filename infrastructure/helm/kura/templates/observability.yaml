@@ -21,6 +21,10 @@ data:
 {{ .Files.Get "config/alert_rules.yml" | indent 4 }}
   alertmanager.yml: |
 {{ .Files.Get "config/alertmanager.yml" | indent 4 }}
+  loki.yml: |
+{{ .Files.Get "config/loki.yml" | indent 4 }}
+  tempo.yml: |
+{{ .Files.Get "config/tempo.yml" | indent 4 }}
   # Promtail en mode Kubernetes : découverte des pods du namespace, étiquette
   # "service" alignée sur app.kubernetes.io/name (même pivot métriques ↔ logs
   # qu'en dev local avec la découverte Docker).
@@ -68,6 +72,7 @@ spec:
         {{- include "kura.labels" $root | nindent 8 }}
         {{- include "kura.selectorLabels" $comp | nindent 8 }}
     spec:
+      enableServiceLinks: false
       containers:
         - name: {{ $comp }}
           image: {{ $spec.image }}
@@ -77,6 +82,10 @@ spec:
             - --storageDataPath={{ $spec.dataPath }}
             - --retentionPeriod={{ $spec.retention }}
             - --httpListenAddr=:{{ $spec.port }}
+          {{- end }}
+          {{- if or (eq $comp "loki") (eq $comp "tempo") }}
+          args:
+            - -config.file=/etc/obs/{{ $comp }}.yml
           {{- end }}
           {{- if eq $comp "grafana" }}
           env:
@@ -109,6 +118,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ $spec.dataPath }}
+            {{- if or (eq $comp "loki") (eq $comp "tempo") }}
+            - name: config
+              mountPath: /etc/obs
+              readOnly: true
+            {{- end }}
             {{- if eq $comp "grafana" }}
             - name: provisioning-datasources
               mountPath: /etc/grafana/provisioning/datasources
@@ -120,6 +134,12 @@ spec:
               mountPath: /var/lib/grafana/dashboards
               readOnly: true
             {{- end }}
+      {{- if or (eq $comp "loki") (eq $comp "tempo") }}
+      volumes:
+        - name: config
+          configMap:
+            name: observability-config
+      {{- end }}
       {{- if eq $comp "grafana" }}
       volumes:
         - name: provisioning-datasources
@@ -161,6 +181,43 @@ spec:
     - port: {{ $spec.port }}
       targetPort: main
 {{- end }}
+---
+{{- /*
+vmagent découvre ses cibles via l'API Kubernetes : il lui faut le droit de
+lister les pods. Role local et non ClusterRole, la découverte étant restreinte
+au namespace de la plateforme (voir config/vmagent-scrape.yml).
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vmagent
+  labels:
+    {{- include "kura.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vmagent
+  labels:
+    {{- include "kura.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods, services, endpoints]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vmagent
+  labels:
+    {{- include "kura.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vmagent
+subjects:
+  - kind: ServiceAccount
+    name: vmagent
 {{- range $comp := list "vmagent" "vmalert" "alertmanager" }}
 {{- $spec := index $obs $comp }}
 ---
@@ -182,6 +239,10 @@ spec:
         {{- include "kura.labels" $root | nindent 8 }}
         {{- include "kura.selectorLabels" $comp | nindent 8 }}
     spec:
+      enableServiceLinks: false
+      {{- if eq $comp "vmagent" }}
+      serviceAccountName: vmagent
+      {{- end }}
       containers:
         - name: {{ $comp }}
           image: {{ $spec.image }}
@@ -286,6 +347,25 @@ spec:
             path: /var/log/pods
         - name: positions
           emptyDir: {}
+---
+{{- /*
+Le frontend interroge vmalert pour afficher l'état des alertes. Nginx résout
+ses hôtes amont au démarrage : sans ce Service, il refuse de démarrer.
+vmagent n'en a pas besoin, personne ne l'appelle.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert
+  labels:
+    {{- include "kura.labels" . | nindent 4 }}
+    {{- include "kura.selectorLabels" "vmalert" | nindent 4 }}
+spec:
+  selector:
+    {{- include "kura.selectorLabels" "vmalert" | nindent 4 }}
+  ports:
+    - port: 8880
+      targetPort: 8880
 ---
 apiVersion: v1
 kind: Service

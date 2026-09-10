@@ -1,48 +1,62 @@
+# Collecte des métriques sur Kubernetes.
+#
+# Les cibles ne sont pas déclarées en dur : sous autoscaling, le nombre de pods
+# d'un service change en cours de route, et une cible statique pointant sur le
+# Service ClusterIP tomberait sur un pod différent à chaque collecte, mélangeant
+# les séries de plusieurs instances. La découverte porte donc sur les pods, et
+# chaque pod est collecté individuellement.
+#
+# Un pod est collecté s'il porte l'annotation prometheus.io/scrape: "true".
+# Le port et le chemin viennent des annotations prometheus.io/port et
+# prometheus.io/path, posées par les templates du chart.
+#
+# La découverte est restreinte au namespace de la plateforme : le ServiceAccount
+# vmagent ne dispose que d'un Role local, pas d'un ClusterRole.
+
 global:
   scrape_interval: 15s
 
 scrape_configs:
+  - job_name: 'kubernetes-pods'
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          own_namespace: true
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+
+      # L'adresse découverte porte le port du premier conteneur ; on la
+      # réécrit avec le port de métriques annoncé par le pod.
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+
+      # job reprend le nom du composant : les séries restent nommées comme
+      # avant la bascule vers la découverte, tableaux de bord inclus.
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        action: replace
+        target_label: job
+
+      # pod distingue les instances d'un même service, ce qui est précisément
+      # ce que la collecte statique ne permettait pas.
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+
+  # VictoriaMetrics se collecte lui-même : instance unique, adresse stable.
   - job_name: 'victoriametrics'
     static_configs:
       - targets: ['victoriametrics:8428']
-
-  - job_name: 'auth-service'
-    static_configs:
-      - targets: ['auth-service:8080']
-
-  - job_name: 'k8s-service'
-    static_configs:
-      - targets: ['k8s-service:8081']
-
-  - job_name: 'terraform-service'
-    static_configs:
-      - targets: ['terraform-service:8082']
-
-  - job_name: 'ansible-service'
-    metrics_path: '/metrics'
-    static_configs:
-      - targets: ['ansible-service:8083']
-
-  - job_name: 'pipeline-service'
-    metrics_path: '/metrics'
-    static_configs:
-      - targets: ['pipeline-service:8084']
-
-  - job_name: 'metrics-service'
-    metrics_path: '/metrics'
-    static_configs:
-      - targets: ['metrics-service:8086']
-
-  - job_name: 'code-service'
-    metrics_path: '/metrics'
-    static_configs:
-      - targets: ['code-service:8088']
-
-  - job_name: 'vault-service'
-    metrics_path: '/metrics'
-    static_configs:
-      - targets: ['vault-service:8087']
-
-  - job_name: 'kong'
-    static_configs:
-      - targets: ['kong:8100']

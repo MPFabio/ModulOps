@@ -5,6 +5,9 @@ on:
     branches: [master, dev]
   pull_request:
     branches: [master, dev]
+  # Permet de publier les images d'une branche de travail sans la fusionner,
+  # pour la deployer sur un environnement de test.
+  workflow_dispatch:
 
 jobs:
   frontend:
@@ -74,6 +77,71 @@ jobs:
         run: gosec -severity medium -exclude-generated ./...
         working-directory: services/${{ matrix.service }}
 
+  # Publication des images applicatives.
+  #
+  # Le déploiement tire ses images d'un registre : sans cette étape, la chaîne
+  # s'arrête au test et rien n'est déployable. Les images ne sont publiées
+  # qu'après le passage des tests et de l'analyse statique. Une pull request
+  # construit sans publier, pour valider le Dockerfile sans encombrer le
+  # registre ; un push ou un déclenchement manuel publie.
+  images:
+    name: Images (construction et publication)
+    runs-on: ubuntu-latest
+    needs: [frontend, services-go]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ansible-service
+          - auth-service
+          - code-service
+          - k8s-service
+          - metrics-service
+          - pipeline-service
+          - terraform-service
+          - vault-service
+          - frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # Le pilote par défaut de buildx ne sait pas exporter de cache : sans
+      # cette étape, cache-to échoue et la construction avec lui.
+      - name: Préparer buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Connexion au registre
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Le chemin d'image suit la convention du chart Helm
+      # (<registre>/kura/<service>), et non celle du docker-compose.
+      - name: Étiquettes de l'image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/kura/${{ matrix.service }}
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Construction et publication
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service == 'frontend' && 'frontend' || format('services/{0}', matrix.service) }}
+          build-args: ${{ matrix.service == 'frontend' && 'VITE_API_BASE_URL=/api' || '' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # Ferme la boucle CI/CD : une fois le code testé et scanné, déclenche le
   # redéploiement de la VM de démo via Forgejo Actions. Le dépôt
   # d'infrastructure (Kuro, sur Codeberg) est volontairement séparé de
@@ -83,13 +151,19 @@ jobs:
   trigger-deploy:
     name: Déclencher le déploiement
     runs-on: ubuntu-latest
-    needs: [frontend, services-go]
+    needs: [frontend, services-go, images]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
+      # L'etiquette des images vient d'etre publiee par le job precedent, au
+      # format sha-<7 caracteres>. La transmettre rend le deploiement
+      # deterministe : le cluster recoit exactement ce que cette execution a
+      # construit et teste, et non la derniere version disponible au moment
+      # ou le deploiement se declenche.
       - name: Dispatch deploy-kura sur Forgejo (Codeberg)
         run: |
+          etiquette="sha-$(echo "${{ github.sha }}" | cut -c1-7)"
           curl -sf -X POST \
             -H "Authorization: token ${{ secrets.FORGEJO_DISPATCH_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"ref":"main"}' \
+            -d "{\"ref\":\"main\",\"inputs\":{\"image_tag\":\"${etiquette}\",\"cible\":\"cluster\"}}" \
             "${{ secrets.FORGEJO_URL }}/api/v1/repos/MPFabio/Kuro/actions/workflows/deploy-kura.yml/dispatches"

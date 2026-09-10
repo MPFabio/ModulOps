@@ -1,0 +1,102 @@
+{{- /*
+PostgreSQL géré par l'opérateur CloudNativePG plutôt que par un StatefulSet
+maison.
+
+L'opérateur porte trois choses qu'un StatefulSet à réplique unique ne peut pas
+donner : la réplication synchrone entre instances, l'archivage WAL continu vers
+un stockage objet, et la restauration à un point dans le temps. Ce sont les
+trois prérequis du PRA de la plateforme (RPO 0, RTO de quelques heures).
+
+Prérequis cluster : l'opérateur CloudNativePG doit être installé (CRD +
+contrôleur). Il n'est pas embarqué dans ce chart, au même titre que le CNI ou
+l'ingress controller.
+
+Secrets attendus :
+  - .Values.postgres.appSecret : type kubernetes.io/basic-auth, clés username
+    et password. C'est l'identité que l'opérateur crée dans la base.
+  - le même mot de passe doit figurer dans le Secret applicatif
+    (.Values.global.existingSecret, clé POSTGRES_PASSWORD) : les microservices
+    lisent leur configuration là, l'opérateur ne la leur injecte pas.
+*/ -}}
+{{- if .Values.postgres.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.postgres.clusterName }}
+  labels:
+    {{- include "kura.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  imageName: {{ .Values.postgres.image }}
+
+  # Une instance par nœud : deux réplicas sur la même machine ne protègent de
+  # rien. En cluster mono-nœud (démonstration), ramener instances à 1.
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.database }}
+      owner: {{ .Values.postgres.owner }}
+      secret:
+        name: {{ .Values.postgres.appSecret }}
+
+  storage:
+    size: {{ .Values.postgres.storage }}
+    {{- if .Values.postgres.storageClassName }}
+    storageClass: {{ .Values.postgres.storageClassName }}
+    {{- end }}
+
+  resources:
+    {{- toYaml .Values.postgres.resources | nindent 4 }}
+
+  # L'opérateur expose les métriques de chaque instance au format Prometheus
+  # sur le port 9187. Le PodMonitor reste désactivé : il suppose l'opérateur
+  # Prometheus, absent du cluster. La configuration de collecte
+  # (config/vmagent-scrape.yml) reste à étendre pour les récupérer.
+  monitoring:
+    enablePodMonitor: false
+
+  {{- if .Values.postgres.backup.enabled }}
+  backup:
+    retentionPolicy: {{ .Values.postgres.backup.retentionPolicy }}
+    barmanObjectStore:
+      destinationPath: {{ .Values.postgres.backup.destinationPath }}
+      {{- if .Values.postgres.backup.endpointURL }}
+      endpointURL: {{ .Values.postgres.backup.endpointURL }}
+      {{- end }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ .Values.postgres.backup.credentialsSecret }}
+          key: {{ .Values.postgres.backup.accessKeyIdKey }}
+        secretAccessKey:
+          name: {{ .Values.postgres.backup.credentialsSecret }}
+          key: {{ .Values.postgres.backup.secretAccessKeyKey }}
+      # Compression des WAL : le volume archivé est le facteur de coût dominant
+      # d'une sauvegarde continue, très au-dessus des sauvegardes de base.
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  {{- end }}
+{{- /*
+Sauvegarde de base planifiée. L'archivage WAL est continu et couvre le point
+dans le temps ; cette sauvegarde complète périodique borne la durée de rejeu
+nécessaire à une restauration.
+*/}}
+{{- if .Values.postgres.backup.enabled }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ .Values.postgres.clusterName }}-base
+  labels:
+    {{- include "kura.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.postgres.backup.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ .Values.postgres.clusterName }}
+{{- end }}
+{{- end }}

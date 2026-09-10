@@ -24,7 +24,11 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM nginx:alpine
+#
+# Image non privilegiee : le chart impose runAsNonRoot, or nginx classique
+# demarre en root pour se lier au port 80. Celle-ci ecoute sur 8080 et
+# n'ecrit que sous /tmp.
+FROM nginxinc/nginx-unprivileged:alpine
 
 # Copy built files to nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
@@ -32,6 +36,6 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80
+EXPOSE 8080
 
 CMD ["nginx", "-g", "daemon off;"]

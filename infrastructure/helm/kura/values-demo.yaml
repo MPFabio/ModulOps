@@ -1,0 +1,30 @@
+# Surcharge pour le cluster de démonstration (kuro-k0s), à passer avec -f.
+#
+# Le chart vise par défaut le registre interne du client, qui n'existe que chez
+# lui. Ici les images viennent du registre public alimenté par la chaîne
+# d'intégration, et l'étiquette suit la branche déployée.
+global:
+  imageRegistry: ghcr.io/mpfabio
+  imageTag: sha-052a584
+
+# Le cluster de démonstration compte trois nœuds porteurs, un contrôleur
+# ordonnançable et deux workers : l'anti-affinité par hôte de CloudNativePG place
+# donc une instance sur chacun, comme chez un client. Sur un cluster mono-nœud,
+# ramener à 1, sans quoi les deux réplicas restent en attente indéfiniment.
+postgres:
+  instances: 3
+
+  # Les sauvegardes sortent du cluster qu'elles protègent : elles visent le
+  # stockage objet de la machine voisine, sur le réseau interne, et non le
+  # MinIO embarqué. Détruire le cluster de démonstration ne détruit donc plus
+  # ses propres sauvegardes, et une restauration devient réellement
+  # démontrable. C'est aussi ce qu'exige le chart en production.
+  #
+  # Adresse privée du sous-réseau : elle est attachée à la machine et survit à
+  # un arrêt, contrairement à l'adresse publique.
+  backup:
+    endpointURL: http://10.30.0.7:9000
+    # Identifiants dédiés à la sauvegarde, distincts des identifiants du MinIO
+    # embarqué : les deux stockages n'ont aucune raison de partager un compte.
+    accessKeyIdKey: BACKUP_S3_ACCESS_KEY
+    secretAccessKeyKey: BACKUP_S3_SECRET_KEY

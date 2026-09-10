@@ -43,6 +43,13 @@ services:
       limits: {memory: 128Mi}
   k8s-service:
     port: 8081
+    # Le service écrit le kubeconfig de chaque cluster raccordé sous
+    # /tmp/kubeconfigs avant d'appeler l'API. Avec une racine en lecture seule
+    # et sans ce volume, le module Kubernetes ne répond plus rien : « open
+    # /tmp/kubeconfigs/... : no such file or directory ». Le défaut ne se voit
+    # pas sous Docker Compose, où la racine du conteneur est inscriptible.
+    writableDirs:
+      - /tmp
     replicas: 2
     resources:
       requests: {cpu: 50m, memory: 64Mi}
@@ -57,6 +64,11 @@ services:
   terraform-service:
     port: 8082
     replicas: 1
+    # Même raison, avec un volume plus sollicité : chaque analyse de dérive
+    # crée un répertoire de travail temporaire et y dépose le cache des
+    # fournisseurs, plusieurs centaines de Mo pour le seul fournisseur Google.
+    writableDirs:
+      - /tmp
     # Ce service exécute `tofu` et les binaires de fournisseurs, qui sont des
     # processus Go complets et non de simples bibliothèques : le fournisseur
     # Google réclame à lui seul plusieurs centaines de Mo. Une limite trop
@@ -91,9 +103,25 @@ services:
       requests: {cpu: 25m, memory: 32Mi}
       limits: {memory: 128Mi}
   frontend:
-    port: 80
+    # Image nginx non privilégiée : elle écoute sur 8080, un port non
+    # réservé, puisqu'un processus non root ne peut pas se lier au port 80.
+    port: 8080
     replicas: 2
     healthPath: /
+    # Nginx servant le bundle React : pas d'endpoint de métriques à collecter.
+    metrics: false
+    # La racine du conteneur est en lecture seule : nginx a besoin d'écrire
+    # son fichier de processus et ses tampons de requête, tous sous /tmp dans
+    # cette image.
+    writableDirs:
+      - /tmp
+    # Requetes obligatoires ici, et pas seulement par bonne pratique : un HPA
+    # exprime en pourcentage d'utilisation calcule ce pourcentage a partir de
+    # la requete CPU. Sans elle, l'autoscaler affiche <unknown> et ne declenche
+    # jamais.
+    resources:
+      requests: {cpu: 25m, memory: 32Mi}
+      limits: {memory: 128Mi}
     # Service statique peu couteux, mais premier point de contact : on preserve
     # le temps de reponse percu en absorbant les pics de connexion.
     autoscaling:
@@ -112,6 +140,10 @@ commonEnv:
   AUTH_SERVICE_URL: http://auth-service:8080
   K8S_SERVICE_URL: http://k8s-service:8081
   CODE_SERVICE_URL: http://code-service:8088
+  # Service en écriture de CloudNativePG : il suit l'instance primaire, une
+  # bascule ne demande donc aucune reconfiguration applicative.
+  POSTGRES_HOST: postgres-rw
+  POSTGRES_PORT: "5432"
   VALKEY_HOST: valkey
   VALKEY_PORT: "6379"
   OTEL_EXPORTER_OTLP_ENDPOINT: tempo:4317
@@ -128,16 +160,46 @@ kong:
 
 # ── Briques de données ────────────────────────────────────────────────────────
 # port = port d'écoute exposé ; dataPath = point de montage du volume persistant.
+# PostgreSQL est géré par l'opérateur CloudNativePG (voir templates/postgres.yaml).
+# L'opérateur doit être installé sur le cluster avant ce chart.
+#
+# Les services joignent la base par le service <clusterName>-rw, que l'opérateur
+# maintient toujours pointé sur l'instance primaire, y compris après bascule.
 postgres:
   enabled: true
-  image: postgres:15-alpine
-  port: 5432
-  dataPath: /var/lib/postgresql/data
+  clusterName: postgres
+  image: ghcr.io/cloudnative-pg/postgresql:15.8
+  # 3 instances : une primaire et deux réplicas, quorum permettant de perdre un
+  # nœud sans interruption. Ramener à 1 sur un cluster mono-nœud.
+  instances: 3
+  database: kura
+  owner: kura
+  # Secret kubernetes.io/basic-auth (clés username et password) créé par
+  # l'exploitation. Le mot de passe doit être identique à POSTGRES_PASSWORD du
+  # Secret applicatif : l'opérateur crée le rôle, les microservices s'y
+  # connectent avec leur propre configuration.
+  appSecret: kura-postgres-app
   storage: 10Gi
   storageClassName: ""
   resources:
-    requests: {cpu: 100m, memory: 128Mi}
-    limits: {memory: 512Mi}
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+  backup:
+    enabled: true
+    # Destination par défaut : le MinIO embarqué, suffisant pour une
+    # démonstration. En production, cette destination DOIT être un stockage
+    # objet externe au cluster : une sauvegarde qui disparaît avec le cluster
+    # qu'elle protège ne couvre aucun des scénarios du PRA.
+    destinationPath: s3://kura-backups/postgres
+    endpointURL: http://minio:9000
+    credentialsSecret: kura-secrets
+    accessKeyIdKey: MINIO_ROOT_USER
+    secretAccessKeyKey: MINIO_ROOT_PASSWORD
+    # Sauvegarde de base quotidienne à 2h ; les WAL sont archivés en continu
+    # entre deux sauvegardes. Format à 6 champs (secondes incluses).
+    schedule: "0 0 2 * * *"
+    retentionPolicy: "30d"
 
 valkey:
   enabled: true

@@ -3,10 +3,26 @@ global:
 
 route:
   receiver: 'default'
+  # Regroupement par alerte et par service : un incident qui touche plusieurs
+  # composants produit une notification, pas une par composant.
   group_by: ['alertname', 'job']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
+  routes:
+    # Seules les alertes critiques ouvrent un incident : un avertissement se
+    # traite en revue, il n'a pas a creer d'issue.
+    - receiver: 'incident-forgejo'
+      matchers:
+        - severity = "critical"
+      continue: true
 
 receivers:
   - name: 'default'
+
+  - name: 'incident-forgejo'
+    webhook_configs:
+      # metrics-service consigne l'incident dans le depot Forgejo du projet.
+      - url: 'http://metrics-service:8086/internal/alerts/webhook'
+        send_resolved: false
+        max_alerts: 0
