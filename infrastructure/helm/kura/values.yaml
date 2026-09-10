@@ -43,6 +43,13 @@ services:
       limits: {memory: 128Mi}
   k8s-service:
     port: 8081
+    # Le service écrit le kubeconfig de chaque cluster raccordé sous
+    # /tmp/kubeconfigs avant d'appeler l'API. Avec une racine en lecture seule
+    # et sans ce volume, le module Kubernetes ne répond plus rien : « open
+    # /tmp/kubeconfigs/... : no such file or directory ». Le défaut ne se voit
+    # pas sous Docker Compose, où la racine du conteneur est inscriptible.
+    writableDirs:
+      - /tmp
     replicas: 2
     resources:
       requests: {cpu: 50m, memory: 64Mi}
@@ -57,6 +64,11 @@ services:
   terraform-service:
     port: 8082
     replicas: 1
+    # Même raison, avec un volume plus sollicité : chaque analyse de dérive
+    # crée un répertoire de travail temporaire et y dépose le cache des
+    # fournisseurs, plusieurs centaines de Mo pour le seul fournisseur Google.
+    writableDirs:
+      - /tmp
     # Ce service exécute `tofu` et les binaires de fournisseurs, qui sont des
     # processus Go complets et non de simples bibliothèques : le fournisseur
     # Google réclame à lui seul plusieurs centaines de Mo. Une limite trop
@@ -103,6 +115,13 @@ services:
     # cette image.
     writableDirs:
       - /tmp
+    # Requetes obligatoires ici, et pas seulement par bonne pratique : un HPA
+    # exprime en pourcentage d'utilisation calcule ce pourcentage a partir de
+    # la requete CPU. Sans elle, l'autoscaler affiche <unknown> et ne declenche
+    # jamais.
+    resources:
+      requests: {cpu: 25m, memory: 32Mi}
+      limits: {memory: 128Mi}
     # Service statique peu couteux, mais premier point de contact : on preserve
     # le temps de reponse percu en absorbant les pics de connexion.
     autoscaling:
